@@ -1,0 +1,6 @@
+{
+  "name": "The Green Table Reservation",
+  "description": "Premium restaurant reservation app for The Green Table with clean scheduling, date/time pickers, and live booking validation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
