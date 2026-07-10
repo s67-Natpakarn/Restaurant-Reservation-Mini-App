@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import liff from "@line/liff";
 import { motion, AnimatePresence } from "motion/react";
 import { 
   Calendar, 
@@ -20,7 +21,8 @@ import {
   X,
   History,
   MapPin,
-  Leaf
+  Leaf,
+  Share2
 } from "lucide-react";
 import { reservationService, ReservationPayload } from "./api/reservationService";
 
@@ -110,6 +112,19 @@ export default function App() {
   
   const [selectedTime, setSelectedTime] = useState<string>("");
 
+  // LINE LIFF state
+  const [isLiffInit, setIsLiffInit] = useState<boolean>(false);
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [profile, setProfile] = useState<{
+    userId: string;
+    displayName: string;
+    pictureUrl?: string;
+    statusMessage?: string;
+  } | null>(null);
+  const [liffError, setLiffError] = useState<string | null>(null);
+  const [liffContext, setLiffContext] = useState<any>(null);
+  const [isShareAvailable, setIsShareAvailable] = useState<boolean>(false);
+
   // Contact Info
   const [fullName, setFullName] = useState<string>("");
   const [phoneNumber, setPhoneNumber] = useState<string>("");
@@ -129,6 +144,137 @@ export default function App() {
     const res = await reservationService.fetchReservations();
     if (res.success && res.reservations) {
       setBookings(res.reservations);
+    }
+  };
+
+  useEffect(() => {
+    const liffId = (import.meta as any).env.VITE_LIFF_ID;
+    if (!liffId) {
+      console.warn("VITE_LIFF_ID is not defined in the environment variables.");
+      setLiffError("LIFF ID is missing. Please check your environment variables.");
+      return;
+    }
+
+    liff
+      .init({ liffId, withLoginOnExternalBrowser: true })
+      .then(() => {
+        setIsLiffInit(true);
+        const loggedIn = liff.isLoggedIn();
+        setIsLoggedIn(loggedIn);
+        setLiffContext(liff.getContext());
+        setIsShareAvailable(liff.isApiAvailable("shareTargetPicker"));
+
+        if (loggedIn) {
+          liff
+            .getProfile()
+            .then((p) => {
+              setProfile(p);
+              setFullName(p.displayName);
+            })
+            .catch((err: any) => {
+              console.error("Error getting LINE profile:", err);
+              setLiffError("Failed to fetch profile: " + err.message);
+            });
+        }
+      })
+      .catch((err: any) => {
+        console.error("LIFF initialization failed:", err);
+        setLiffError("LIFF Initialization failed: " + err.message);
+      });
+  }, []);
+
+  const handleLogin = () => {
+    if (isLiffInit && !liff.isLoggedIn()) {
+      liff.login();
+    }
+  };
+
+  const handleLogout = () => {
+    if (isLiffInit && liff.isLoggedIn()) {
+      liff.logout();
+      setIsLoggedIn(false);
+      setProfile(null);
+      setFullName("");
+    }
+  };
+
+  const handleInviteFriends = async () => {
+    if (!isLiffInit) return;
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
+
+    if (liff.isApiAvailable("shareTargetPicker")) {
+      const liffId = liff.getContext()?.liffId || (import.meta as any).env.VITE_LIFF_ID || "2010663880-QqBFRfDu";
+      const liffUrl = `https://liff.line.me/${liffId}`;
+
+      try {
+        const res = await liff.shareTargetPicker([
+          {
+            type: "flex" as const,
+            altText: "มาจองโต๊ะด้วยกันที่ The Green Table",
+            contents: {
+              type: "bubble" as const,
+              hero: {
+                type: "image" as const,
+                url: "https://images.unsplash.com/photo-1544025162-d76694265947?auto=format&fit=crop&w=800&q=80",
+                size: "full" as const,
+                aspectRatio: "20:13" as const,
+                aspectMode: "cover" as const
+              },
+              body: {
+                type: "box" as const,
+                layout: "vertical" as const,
+                contents: [
+                  {
+                    type: "text" as const,
+                    text: "The Green Table",
+                    weight: "bold" as const,
+                    size: "xl" as const,
+                    color: "#1A1A1A"
+                  },
+                  {
+                    type: "text" as const,
+                    text: "มาจองโต๊ะด้วยกันที่ The Green Table",
+                    margin: "md" as const,
+                    size: "sm" as const,
+                    color: "#4B5563",
+                    wrap: true
+                  }
+                ]
+              },
+              footer: {
+                type: "box" as const,
+                layout: "vertical" as const,
+                spacing: "sm" as const,
+                contents: [
+                  {
+                    type: "button" as const,
+                    style: "primary" as const,
+                    height: "sm" as const,
+                    color: "#00C853",
+                    action: {
+                      type: "uri" as const,
+                      label: "จองโต๊ะเลย",
+                      uri: liffUrl
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        ]);
+        if (res) {
+          console.log("Invitation shared successfully!");
+        } else {
+          console.log("Invitation sharing cancelled.");
+        }
+      } catch (err: any) {
+        console.error("Error sharing invitation:", err);
+      }
+    } else {
+      console.warn("Share Target Picker is not available in this environment.");
     }
   };
 
@@ -209,6 +355,45 @@ export default function App() {
               <span className="text-white text-[9px] font-medium bg-black/40 px-2 py-0.5 rounded-md">
                 Est. 2018
               </span>
+            </div>
+          </div>
+
+          {/* LINE Mini App Auth Bar */}
+          <div className="bg-[#F4F9F5] border-b border-[#E8F5E9] px-6 py-3 flex items-center justify-between text-xs">
+            <div className="flex items-center space-x-2">
+              <div className={`w-2.5 h-2.5 rounded-full ${isLiffInit ? "bg-[#06C755] shadow-[0_0_8px_rgba(6,199,85,0.5)] animate-pulse" : "bg-amber-400"}`} />
+              <span className="text-[11px] text-gray-600 font-medium tracking-wide">
+                {!isLiffInit ? (
+                  "Initializing LINE..."
+                ) : liff.isInClient() ? (
+                  <span className="flex items-center text-[#06C755] font-semibold">
+                    LINE In-App Browser
+                  </span>
+                ) : (
+                  "LINE External Web App"
+                )}
+              </span>
+            </div>
+            
+            <div>
+              {isLoggedIn ? (
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="bg-red-50 hover:bg-red-100 text-red-600 font-bold px-3 py-1.5 rounded-full transition-colors cursor-pointer text-[11px] uppercase tracking-wider"
+                >
+                  Logout
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleLogin}
+                  disabled={!isLiffInit}
+                  className="bg-[#06C755] hover:bg-[#05b34c] disabled:opacity-50 text-white font-bold px-3 py-1.5 rounded-full transition-colors flex items-center space-x-1 cursor-pointer text-[11px] uppercase tracking-wider shadow-xs"
+                >
+                  <span>Login with LINE</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -315,6 +500,57 @@ export default function App() {
           {/* Form wrapper */}
           <form onSubmit={handleReserve} className="p-5 space-y-5">
             
+            {/* LINE User Profile Card */}
+            {isLoggedIn && profile && (
+              <div className="space-y-3">
+                <div className="bg-[#E8F5E9]/80 border border-[#C8E6C9] rounded-2xl p-4 flex items-start space-x-3.5 shadow-xs">
+                  {profile.pictureUrl ? (
+                    <img
+                      src={profile.pictureUrl}
+                      alt={profile.displayName}
+                      className="w-14 h-14 rounded-full object-cover border-2 border-white shadow-sm flex-shrink-0"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className="w-14 h-14 rounded-full bg-[#06C755]/10 border-2 border-white text-[#06C755] font-bold text-xl flex items-center justify-center shadow-sm flex-shrink-0">
+                      {profile.displayName.slice(0, 1).toUpperCase()}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-bold text-gray-800 truncate block">
+                        {profile.displayName}
+                      </span>
+                      <span className="inline-flex items-center text-[9px] bg-[#06C755] text-white px-2 py-0.5 rounded-full font-semibold font-mono tracking-wide">
+                        LINE USER
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-gray-500 font-mono mt-1 break-all" title={profile.userId}>
+                      <span className="text-gray-400 font-semibold select-none">LINE ID: </span>{profile.userId}
+                    </p>
+                    {profile.statusMessage && (
+                      <p className="text-[10px] text-gray-600 italic bg-white/60 rounded-lg px-2.5 py-1.5 mt-2 border border-emerald-50/50 leading-relaxed break-words">
+                        "{profile.statusMessage}"
+                      </p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Invite Friends Button */}
+                {isShareAvailable && (
+                  <button
+                    type="button"
+                    onClick={handleInviteFriends}
+                    className="w-full h-11 bg-white border border-[#06C755] hover:bg-[#F4F9F5] active:scale-[0.99] text-[#06C755] font-bold rounded-xl transition-all duration-200 flex items-center justify-center space-x-2 text-xs uppercase tracking-wider shadow-xs cursor-pointer"
+                    id="btn-invite-friends"
+                  >
+                    <Share2 className="w-4 h-4" />
+                    <span>Invite Friends</span>
+                  </button>
+                )}
+              </div>
+            )}
+
             {/* 1. Guest Selector Section */}
             <div className="space-y-2">
               <h2 className="text-[11px] font-bold text-[#AAA] uppercase tracking-wider flex justify-between items-baseline">

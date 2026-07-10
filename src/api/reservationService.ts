@@ -1,3 +1,5 @@
+import liff from "@line/liff";
+
 export interface ReservationPayload {
   guests: number;
   date: string; // YYYY-MM-DD
@@ -48,11 +50,22 @@ export const reservationService = {
    */
   async submitReservation(payload: ReservationPayload): Promise<ReservationResponse> {
     try {
+      const headers: Record<string, string> = {
+        "Content-Type": "application/json",
+      };
+
+      try {
+        const accessToken = liff.getAccessToken();
+        if (accessToken) {
+          headers["x-liff-access-token"] = accessToken;
+        }
+      } catch (err) {
+        console.warn("Could not retrieve LIFF access token:", err);
+      }
+
       const response = await fetch("/api/reservations", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers,
         body: JSON.stringify(payload),
       });
 

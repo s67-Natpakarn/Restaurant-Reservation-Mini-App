@@ -102,6 +102,95 @@ async function startServer() {
 
       reservations.push(newReservation);
 
+      // Check if LINE credentials and LIFF Access Token are available
+      const liffAccessToken = req.headers["x-liff-access-token"] as string | undefined;
+      const channelId = process.env.LINE_CHANNEL_ID || process.env.CHANNEL_ID;
+      const channelSecret = process.env.LINE_CHANNEL_SECRET || process.env.CHANNEL_SECRET;
+
+      if (liffAccessToken && channelId && channelSecret) {
+        // Trigger LINE Service Message asynchronously so it doesn't block the user's booking response
+        (async () => {
+          try {
+            console.log("Initiating LINE Service Message flow...");
+            // Step A: Issue Stateless Channel Access Token
+            const tokenParams = new URLSearchParams();
+            tokenParams.append("grant_type", "client_credentials");
+            tokenParams.append("client_id", channelId);
+            tokenParams.append("client_secret", channelSecret);
+
+            const tokenRes = await fetch("https://api.line.me/oauth2/v3/token", {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/x-www-form-urlencoded",
+              },
+              body: tokenParams.toString(),
+            });
+
+            if (!tokenRes.ok) {
+              const errText = await tokenRes.text();
+              throw new Error(`Failed to get stateless channel access token: ${errText}`);
+            }
+
+            const tokenData = (await tokenRes.json()) as { access_token: string };
+            const statelessAccessToken = tokenData.access_token;
+
+            // Step B: Issue Service Notification Token
+            const notifierRes = await fetch("https://api.line.me/message/v3/notifier/token", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${statelessAccessToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                liffAccessToken,
+              }),
+            });
+
+            if (!notifierRes.ok) {
+              const errText = await notifierRes.text();
+              throw new Error(`Failed to get notification token: ${errText}`);
+            }
+
+            const notifierData = (await notifierRes.json()) as { notificationToken: string };
+            const notificationToken = notifierData.notificationToken;
+
+            // Step C: Send the Service Message
+            const liffId = process.env.VITE_LIFF_ID || "2010663880-QqBFRfDu";
+            const liffUrl = `https://miniapp.line.me/${liffId}`;
+
+            const sendRes = await fetch("https://api.line.me/message/v3/notifier/send?target=service", {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${statelessAccessToken}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                templateName: "book_request_s_b_th",
+                params: {
+                  number: uniqueId,
+                  btn1_url: liffUrl,
+                  btn2_url: liffUrl,
+                  btn3_url: liffUrl,
+                  btn4_url: liffUrl,
+                },
+                notificationToken,
+              }),
+            });
+
+            if (!sendRes.ok) {
+              const errText = await sendRes.text();
+              throw new Error(`Failed to send service message: ${errText}`);
+            }
+
+            console.log(`LINE Service Message sent successfully for reservation: ${uniqueId}`);
+          } catch (lineErr: any) {
+            console.error("Error in LINE Service Message flow:", lineErr.message || lineErr);
+          }
+        })();
+      } else {
+        console.log("Skipping LINE Service Message flow. Missing header or channel credentials.");
+      }
+
       return res.status(201).json({
         success: true,
         reservation: newReservation
